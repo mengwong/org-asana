@@ -38,9 +38,15 @@ Org-Asana synchronizes Org to Asana and Asana to Org.
 ** Configuration
 
 ~/.org-asana-rc is a YAML config file which specifies:
-- asana_api :: your Asana API key
-- asana_dir :: root directory for Org-Asana. By default, ~/org-asana/
-- asana_userlist :: (optional) a list of email addresses of users that you care about. any users not listed will be ignored.
+- api_key :: your Asana API key
+- dir :: root directory for Org-Asana. By default, ~/org-asana/
+
+*** for a future release
+
+- exclude_users :: (optional) a list of email addresses of users that you don't care about. any users     listed will be ignored.
+- include_users :: (optional) a list of email addresses of users that you       care about. any users not listed will be ignored.
+
+You can only have one or the other of exclude_users / include_users.
 
 ** Directory Structure
 
@@ -78,13 +84,13 @@ If a task's title ends with a colon, Asana recognizes it as a Priority Heading. 
 
 - After you make changes to your org-file, you have to hit save for Org-Asana to see those changes. Get in the habit of hitting C-x C-s.
 
-- If you have multiple workspaces, you will find your tasks spread across multiple files. You will probably want to each of those files to your agenda-file-list by pressing C-c [.
+- If you have multiple workspaces, you will find your tasks spread across multiple files. You will probably want to add each of those files to your agenda-file-list by pressing C-c [.
 
 - You probably don't want to add other people's org files to your agenda-file-list. They are only there for you to browse.
 
 *** If you already have an Org agenda file which you want to import into Asana
 
-1. Run orgasanad at least once. Let it create the workspace directory structure.
+1. Run oa-d at least once. Let it create the workspace directory structure.
 
 2. Tag up your Org file as follows:
    - tag project headings with :project:
@@ -132,7 +138,7 @@ If you try to do crazy things, there is no telling what Org-Asana will do. Its b
 Please see [[id:BEEB2234-84A1-4ADB-BD50-D330C412B6E3][Optimistic Replication]] for foundational theory.
 
 In summary, Org-Asana involves:
-- multimaster hub-and-spoke replication with optional slaves :: Asana is the master hub. Each Org hierarchy running orgasanad is a master spoke. The Org hierarchies may themselves be further replicated across multiple sites using filesystem synchronization; we consider any such sites to be optional slaves and do not deal with them further. In the common case there is one hub and one spoke.
+- multimaster hub-and-spoke replication with optional slaves :: Asana is the master hub. Each Org hierarchy running oa-d is a master spoke. The Org hierarchies may themselves be further replicated across multiple sites using filesystem synchronization; we consider any such sites to be optional slaves and do not deal with them further. In the common case there is one hub and one spoke.
 - state-transfer rather than operation-transfer :: We replicate entire objects (tasks, projects, stories).
 - syntactic scheduling :: We rely on timestamps (created_at and modified_at on the Asana side, and file last-modified times on the Org side).
 - two-timestamp algorithm :: Each object possesses two timestamps, latest and previous. This is an extension to Thomas's write rule.
@@ -331,7 +337,9 @@ Set /last-sync-time/ to /sync-start-time/.
 Set /org-to-asana-time/ to /org-scan-time/.
 Set /asana-to-org-time/ to /asana-scan-time/.
 *** Libraries
-**** OrgAsana::Cache
+**** Org::Asana
+The $oa object does most of the work. The oa-d just puts it through its paces.
+**** Org::Asana::Cache
 
 Knows how to read a cache YAML file.
 
@@ -343,27 +351,27 @@ Labels each object in the cache with the two last_modified timestamps.
 
 Knows how to update a given object.
 
-**** OrgAsana::Cache::Org
+**** Org::Asana::Cache::Org
 
 Deals with the Org cache.
 
 Knows how to traverse the Org hierarchies and update the Org YAML cache.
 
-**** OrgAsana::Cache::Asana
+**** Org::Asana::Cache::Asana
 
 Deals with the Asana cache(s).
 
 Knows how to traverse Asana and update the Asana YAML cache.
 
-**** OrgAsana::Cache::Asana::Full
+**** Org::Asana::Cache::Asana::Full
 
 Performs a full traversal of Asana.
 
-**** OrgAsana::Cache::Asana::Part
+**** Org::Asana::Cache::Asana::Part
 
 Limits its Asana traversal to just those objects which deserve special attention.
 
-**** OrgAsana::Sync
+**** Org::Asana::Sync
 
 Given two sets of Cache objects, compute the deltas.
 

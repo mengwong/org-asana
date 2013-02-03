@@ -1,0 +1,23 @@
+#!/usr/bin/perl
+
+# https://github.com/mengwong/org-asana/
+
+use strict;
+use Org::Asana;
+use Org::Asana::Sync;
+
+use Getopt::Long;
+my %opt;
+GetOptions(\%opt,
+		   "rc=s",
+		   "v",
+	);
+
+my $oa = Org::Asana->new($opt{rc} ? (       rc=>$opt{rc}) : (),
+						 $opt{v}  ? (verbosity=>$opt{v} ) : (),
+	);
+
+while (1) {
+	$oa->sleep;
+	$oa->manage_caches;
+}
