@@ -157,12 +157,18 @@ One or more Asana Caches are created by the oa-build-asana-cache process. A Full
 
 We maintain a metadata cache of Org: a YAML representation of the entire Org hierarchy. We detect changes by comparing the Org hierarchy on disk with the cached version in YAML. This is a Full Cache.
 
+**** Local Caches are an Intermediate Replica
+
+The local caches of Asana and Org themselves constitute intermediate replicas. They are slaves against their respective masters.
+
+Consider the addition of a Story to a Task. It is slow to find all the stories on all the tasks: no bulk GET is available. So it is expensive to retrieve all the stories on all the tasks. We know that the addition of a Story to a Task causes the Task's modified_at to change. We can therefore maintain a valid slave by grabbing all Tasks, examining their modified_at stamps, and redownloading in full only those Tasks which have changed since the last time the local cache was built.
+
 **** Per-Object Metadata in Cache
 
 Each object has the following attributes in each cache:
 
-- last-modified-at :: the last modified time -- this corresponds to ts in Fig 11 of Saito&Shapiro.
-- previously-modified :: the previous last modified time -- this corresponds to prevTs
+- modified_at :: the last modified time -- this corresponds to ts in Fig 11 of Saito&Shapiro.
+- previously_modified_at :: the previous last modified time -- this corresponds to prevTs
 - hash :: a hash of the current contents of the object, used for researching other ways of change tracking.
 - hashlog :: a hash version history of recent changes.
 
@@ -373,12 +379,18 @@ Limits its Asana traversal to just those objects which deserve special attention
 
 **** Org::Asana::Sync
 
-Given two sets of Cache objects, compute the deltas.
+Given two sets of Cache objects, compute a synchronized head, and compute the commit deltas between the Cache objects and the head.
 
-Given a set of deltas, commit changes.
+Commit those deltas to the respective sites -- Org and Asana.
 
-Write the transaction log so that subsequent runs do not repeat changes unnecessarily.
+Write a transaction log so that subsequent runs do not repeat changes unnecessarily.
 
+Invariant: subsequent to the commits, the caches will reload. The new caches should be completely in sync and the diff detector should not trigger.
+
+**** Org::Asana::Sync::Org
+Knows how to write the latest synchronized head to the Org files on disk.
+**** Org::Asana::Sync::Asana
+Knows how to write the latest synchronized head to Asana via the web API.
 *** Common Updates
 
 | Event at Asana | Event at Org | Update at Org      | Update at Asana    | Development Status | Comments |
@@ -445,33 +457,6 @@ So, if your Asana tags happen to match those tags, Org-Asana will automatically 
 - http://search.cpan.org/~getty/WWW-Asana-0.003/lib/WWW/Asana.pm
 - http://search.cpan.org/~sharyanto/Org-Parser-0.29/lib/Org/Parser.pm
 
-* Local Modifications
-
-Meng added a tasks() method to Project.pm, pretty much copied over from Workspace::tasks
-
-  # GET /projects/<project-id>/tasks
-  sub tasks {
-      my ( $self, $assignee ) = @_;
-      $self->do('[Task]', 'GET', $self->own_base_args, 'tasks', [
-          assignee => ref $assignee eq "WWW::Asana::User" ? $assignee->id : $assignee,
-      ], sub { my ( %data ) = @_; defined $data{workspace} ? () : ( workspace => $self->workspace ) });
-  }
-
-Meng added an id -> $user cache to User.pm, because Task->assignee() doesn't come with name,email attributes.
-
-    around BUILDARGS => sub {
-        my $orig = shift;
-        my $class = shift;
-        # warn ">>>  new User with args @_\n";
-        my %args = @_;
-        if (not $args{name}) {
-            if ($cache{$args{id}}) { # warn ("  !  but i am in the cache already.\n") ;
-                return $cache{$args{id}};
-            }
-            else { confess ("!!! new User called without name. most unfortunate.\n"); }
-        }
-        return $cache{$args{id}} = $class->$orig(@_);
-    };
 
 * Future Directions
 
@@ -482,26 +467,31 @@ Meng added an id -> $user cache to User.pm, because Task->assignee() doesn't com
 Note that auto-revert-mode is automatically defined by default. This allows a2o to update your orgfile in the background, and lets emacs pick up the changes without needing to reload.
 
 * TASKS
-** TODO add attachment support
+** TODO build out parent/subtask relationships based on individual task entries.
+** TODO fast: redownload all the tasks. if any tasks have been updated at the server since the last run, redownload their stories. optimize the local Asana cache.
+** TODO find some way of integrating the Org perl libraries with the WWW::Asana perl libraries so the same object is dually represented. probably some sort of clever mixin hierarchy. this is actually the sync.
 ** DONE figure out sensible file structure.
 - State "DONE"       from ""           [2013-02-02 Sat 21:11]
-** TODO record all available asana properties into the :PROPERTIES: drawer.
+** DONE record all available asana properties into the :PROPERTIES: drawer.
 - in particular, asana_id needs to be saved
-** TODO handle section categories that end in colon. give them their own headline level
-** TODO link the headings directly to the asana URLs
-** TODO if a task has subtasks, give it a [0/1] heading
-*** TODO may need to add subtask support to WWW::Asana, i think subtasks only showed up since the last WWW::Asana update.
-- State "TODO"       from ""           [2013-02-02 Sat 21:12]
+** DONE handle section categories that end in colon. give them their own headline level
 ** TODO add robust error handling:
    malformed JSON string, neither array, object, number, string or atom, at character offset 0 (before "<!DOCTYPE html>\n<ht...") at /Library/Perl/5.12/WWW/Asana/Response.pm line 100.
 ** TODO optimize syncing.
 - maybe do this by test last-update times? we could update changed files but honour timestamping -- use "latest wins" strategy.
 - consider also the hashing strategy described in toodledo
-** TODO find some way of integrating the Org perl libraries with the WWW::Asana perl libraries so the same object is dually represented. probably some sort of clever mixin hierarchy.
-** TODO add support to WWW::Asana for Stories
-- State "TODO"       from ""           [2013-02-03 Sun 12:43]
-** TODO add support to WWW::Asana for Subtasks
+** DONE add support to WWW::Asana for Stories
+** DONE add support to WWW::Asana for Subtasks
 ** TODO buffer up a queue of remote->local changes and apply them only when the relevant .org buffers are not under active editing -- test by looking for the .#filename -> symlink.
 ** TODO roundtrip the other way -- write separate o2a script that updates asana with new tasks, updated statuses, etc etc.
+** DONE does updating a story on a task cause the task's modified_at to change?
+yes
+** TODO do the right thing for object archiving / deletion
+** TODO do the right thing for subtask dissociation from parent, or relocation into a different project.
+** TODO link the headings directly to the asana URLs
+** TODO if a task has subtasks, give it a [1/1] heading
+*** DONE may need to add subtask support to WWW::Asana, i think subtasks only showed up since the last WWW::Asana update.
+- State "TODO"       from ""           [2013-02-02 Sat 21:12]
+** TODO add attachment support
 
 * that's all!

@@ -11,13 +11,21 @@ my %opt;
 GetOptions(\%opt,
 		   "rc=s",
 		   "v",
+		   "sensitive",
 	);
+
+select STDERR; $|++;
+select STDOUT; $|++;
 
 my $oa = Org::Asana->new($opt{rc} ? (       rc=>$opt{rc}) : (),
 						 $opt{v}  ? (verbosity=>$opt{v} ) : (),
+						 sensitive => $opt{sensitive},
 	);
 
+select STDERR; $|++; select STDOUT; $|++;
+
 while (1) {
-	$oa->sleep;
 	$oa->manage_caches;
+	$oa->sync;
+	$oa->sleep;
 }

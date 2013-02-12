@@ -7,35 +7,31 @@ package Org::Asana::Cache;
 
 use Moose::Role;
 use YAML qw(LoadFile DumpFile);
+use Tie::IxHash;
+use Class::Load ':all';
 
 requires 'build_cache';
 
 has oa => (is=>'ro', isa=>'Org::Asana', required=>1);
 
 has is_loaded => (is=>'rw', isa=>'Bool', default=>0);
+has is_usable => (is=>'rw', isa=>'Bool', default=>0);
 
-has scan_time => (is=>'rw', isa=>'Num');
+has scan_time => (is=>'rw', isa=>'Num', default=>0);
 has scan_start_time => (is=>'rw', isa=>'Num');
 
-requires 'expires_after';
-sub is_expired {
-	my $self = shift;
-	if (my $is_expired = ($self->scan_time + $self->expires_after < time)) {
-		$self->oa->verbose("*** %s is expired (%d+%d < %d; scan_time=%s)", ref($self), $self->scan_time, $self->expires_after, time, scalar(localtime($self->scan_time)));
-		return 1;
-	}
-	return 0;
-}
-
 sub previous_is_running {
-	my $self = shift;f
+	my $self = shift;
 
 	my $pid = $self->runpidfile_read;
 
 	if ($pid and kill(0,$pid)) {
 		$self->oa->verbose("!!! previous cache build is running -- %s contains PID %s", $self->runpidfilename, $pid);
 		return 1;
-	}
+	} elsif ($pid) {
+		$self->oa->verbose("!!! previous cache build $pid seems to have died. If that's okay, rm %s", $self->runpidfilename);
+		die if $self->oa->sensitive;
+	}		
 	return 0;
 }
 
@@ -53,6 +49,7 @@ sub runpidfile_write {
 	open FILE, ">", $self->runpidfilename;
 	print FILE $$,"\n";
 	close FILE;
+	$self->oa->verbose("launched");
 }
 
 sub runpidfile_clear {
@@ -69,17 +66,20 @@ sub build { # not BUILD. build() actually builds the cache.
 		return;
 	}
 	else { # maybe an earlier build completed?
-		$self->oa->verbose("*** launching build of %s", ref($self));
+		$self->oa->verbose("*** forking build of %s", ref($self));
 	}		
 
 	if    (fork()) {                          wait; }
 	elsif (fork()) {                          exit; }
-	else           { $self->runpidfile_write;
+	else           { $self->oa->verbosity_prefix(sprintf "-child- %s %s: ", ref($self), $$);
+					 $self->runpidfile_write;
 					 $self->scan_start_time(time);
 					 $self->build_cache;
 					 $self->scan_time($self->scan_start_time);
 					 $self->save_contents_tofile;
-					 $self->runpidfile_clear; exit; }
+					 $self->runpidfile_clear;
+					 $self->oa->verbose("build complete. exiting. build took %d seconds.", time - $self->scan_start_time);
+					 exit; }
 }
 
 requires 'cachefilename';
@@ -90,11 +90,6 @@ has contents => (is=>'rw', isa=>'HashRef');
 # - contents: { }
 # - scan_time: time()
 # - part_or_full: part|full (optional)
-
-sub BUILD {
-	my $self = shift;
-	$self->reload_fromfile;
-}	
 
 sub reload_fromfile {
 	my $self = shift;
@@ -120,6 +115,41 @@ sub save_contents_tofile {
 						  scan_time => $self->scan_time,
 			 });
 	rename($filename, $self->cachefilename); # atomic rename.
+}
+
+
+
+
+sub walk_contents {
+	my $self = shift;
+	my $callback = shift;
+	my $contents = shift;
+	my $path = shift;
+
+#	$self->oa->verbose("walk_contents - @{$path}");
+#	$self->oa->verbose("              - $_ = $contents->{$_}") for keys %$contents;
+
+	while (my ($type, $subtree) = each %$contents) {
+		if ($type eq "obj") { my $obj = $subtree;
+							  if (ref($obj) =~ /::/) { load_class(ref($obj)) unless is_class_loaded(ref($obj)); }
+							  $callback->($self, $obj, $path, $contents);
+#							  $self->oa->verbose("walk_contents >> @{$path} >> callbacking object $obj");
+		} else {
+			foreach my $id (keys %$subtree) {
+				my $subsub = $subtree->{$id};
+#				$self->oa->verbose("walk_contents >> @{[%$path]} >> recursing into $type $id");
+				next if not $subsub;
+				$self->walk_contents($callback, $subsub, [ @$path, $type => $id ] );
+			}
+		}
+	}
+}
+
+
+sub walk {
+	my $self = shift;
+	my $callback = shift;
+	$self->walk_contents($callback, $self->contents, [] );
 }
 
 1;
