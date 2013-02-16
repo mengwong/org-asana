@@ -468,8 +468,8 @@ Note that auto-revert-mode is automatically defined by default. This allows a2o 
 
 * TASKS
 ** TODO build out parent/subtask relationships based on individual task entries.
-** TODO fast: redownload all the tasks. if any tasks have been updated at the server since the last run, redownload their stories. optimize the local Asana cache.
-** TODO find some way of integrating the Org perl libraries with the WWW::Asana perl libraries so the same object is dually represented. probably some sort of clever mixin hierarchy. this is actually the sync.
+** DONE fast: redownload all the tasks. if any tasks have been updated at the server since the last run, redownload their stories. optimize the local Asana cache.
+** DONE find some way of integrating the Org perl libraries with the WWW::Asana perl libraries so the same object is dually represented. probably some sort of clever mixin hierarchy. this is actually the sync.
 ** DONE figure out sensible file structure.
 - State "DONE"       from ""           [2013-02-02 Sat 21:11]
 ** DONE record all available asana properties into the :PROPERTIES: drawer.
@@ -477,16 +477,17 @@ Note that auto-revert-mode is automatically defined by default. This allows a2o 
 ** DONE handle section categories that end in colon. give them their own headline level
 ** TODO add robust error handling:
    malformed JSON string, neither array, object, number, string or atom, at character offset 0 (before "<!DOCTYPE html>\n<ht...") at /Library/Perl/5.12/WWW/Asana/Response.pm line 100.
-** TODO optimize syncing.
+** DONE optimize syncing.
 - maybe do this by test last-update times? we could update changed files but honour timestamping -- use "latest wins" strategy.
 - consider also the hashing strategy described in toodledo
 ** DONE add support to WWW::Asana for Stories
 ** DONE add support to WWW::Asana for Subtasks
 ** TODO buffer up a queue of remote->local changes and apply them only when the relevant .org buffers are not under active editing -- test by looking for the .#filename -> symlink.
-** TODO roundtrip the other way -- write separate o2a script that updates asana with new tasks, updated statuses, etc etc.
+** TODO roundtrip from org to asana
 ** DONE does updating a story on a task cause the task's modified_at to change?
 yes
 ** TODO do the right thing for object archiving / deletion
+have a special section which requires review and an opinion into PROPERTIES.
 ** TODO do the right thing for subtask dissociation from parent, or relocation into a different project.
 ** TODO link the headings directly to the asana URLs
 ** TODO if a task has subtasks, give it a [1/1] heading
