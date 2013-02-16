@@ -59,7 +59,7 @@ sub calculate_changes {
 		if    ($obj_asana and not $obj_org)   {
 
 			$self->oa->verbose("change: %s asana exists; org doesn't exist. %s",			$path, ($obj_asana->can("name") ? $obj_asana->name : "NO-NAME"));
-			$self->contents{$path}->{resolution} = "create in org";
+			$self->contents->{$path}->{resolution} = "create in org";
 		}
 
 		elsif ($obj_org   and not $obj_asana) {
@@ -69,17 +69,17 @@ sub calculate_changes {
 			if ($obj_org->can("confirm_create_asana") and
 				$obj_org->confirm_create_asana
 				) {
-				$self->contents{$path}->{resolution} = "create in asana";
+				$self->contents->{$path}->{resolution} = "create in asana";
 				
 			} else {
-				$self->contents{$path}->{resolution} = "request confirmation in org";
+				$self->contents->{$path}->{resolution} = "request confirmation in org";
 			}
 		}
 
 		elsif (not $obj_asana->can("modified_at") or not $obj_org->can("modified_at")) { 
 
 			$self->oa->verbose("change: %s no modtime to compare. %s",                      $path, ($obj_asana->can("name") ? $obj_asana->name : "NO-NAME"));
-			$self->contents{$path}->{resolution} = "noop";
+			$self->contents->{$path}->{resolution} = "noop";
 		}
 
 		# XXX: detect conflicts.
@@ -87,19 +87,19 @@ sub calculate_changes {
 		elsif (($obj_asana->modified_at||$obj_asana->created_at) >  ($obj_org->modified_at||$obj_org->created_at)) {
 
 			$self->oa->verbose("change: %s asana is newer. %s", 							$path, ($obj_asana->can("name") ? $obj_asana->name : "NO-NAME"));
-			$self->contents{$path}->{resolution} = "update org";
+			$self->contents->{$path}->{resolution} = "update org";
 		}
 
 		elsif (($obj_asana->modified_at||$obj_asana->created_at) <  ($obj_org->modified_at||$obj_org->created_at)) {
 
 			$self->oa->verbose("change: %s org is newer. %s",								$path, ($obj_org  ->can("name") ? $obj_org  ->name : "NO-NAME"));
-			$self->contents{$path}->{resolution} = "update asana";
+			$self->contents->{$path}->{resolution} = "update asana";
 		}
 
 		elsif (($obj_asana->modified_at||$obj_asana->created_at) == ($obj_org->modified_at||$obj_org->created_at)) {
 
 			$self->oa->verbose("change: %s no change. %s",									$path, ($obj_asana->can("name") ? $obj_asana->name : "NO-NAME"));
-			$self->contents{$path}->{resolution} = "noop";
+			$self->contents->{$path}->{resolution} = "noop";
 
 		}
 		else { $self->oa->verbose("change: ERROR -- how did we get here?") }
