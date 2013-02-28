@@ -15,6 +15,7 @@ has 'sensitive'        => (is=>'rw',isa=>'Bool',default=>0); # do we die on erro
 sub verbose {
 	my $self = shift;
 	return if not $self->verbosity;
+	no warnings;
 	print  STDERR $self->verbosity_prefix;
 	printf STDERR @_;
 	print  STDERR "\n";
@@ -84,10 +85,13 @@ has 'sleep_times'    => (is=>'rw',isa=>'Num',default=>0);
 sub sleep {
 	my $self = shift;
 	$self->verbose("  - sleeping. (%s)", scalar localtime);
-	sleep $self->sleep_interval if $self->sleep_times;
+	sleep $self->sleep_interval;
 	$self->sleep_times($self->sleep_times+1);
 }
 
+
+
+has 'match_workspaces' => (is=>'rw', isa=>'RegexpRef');
 
 
 
@@ -98,6 +102,7 @@ use Org::Asana::Cache::Merge;
 sub manage_caches {
 	my $self = shift;
 	$self->verbose("managing caches.");
+
 	$self->clear_cache_asana; $self->cache_asana->rebuild_as_needed;
 	$self->clear_cache_org;   $self->cache_org->rebuild_as_needed;
 	$self->clear_cache_merge; $self->cache_merge if ($self->cache_asana->is_usable and $self->cache_org->is_usable);
@@ -116,56 +121,36 @@ sub _build_cache_merge { Org::Asana::Cache::Merge->new(oa=>shift) }
 # workspace -> tag
 
 
+sub changes_detected_since_last_merge {
+	my $self = shift;
+	if (not $self->cache_merge->has_output_time) { return 1 }
+	# have either cache_org or cache_asana changed since our last to_asana_time / to_org_time?
+	if ($self->cache_asana->modified_at > $self->cache_merge->output_time
+		or
+		$self->cache_org->modified_at > $self->cache_merge->output_time) {
+		$self->verbose("something has changed since the last merge.");
+		return 1;
+	} else {
+		$self->verbose("nothing has changed since the last merge.");
+		return 0;
+	}
+}
+
 sub sync {
 	my $self = shift;
 	return if not $self->has_cache_merge;
-	$self->cache_merge->calculate_changes;
-	$self->merge_to_asana;
-	$self->merge_to_org;
+	$self->verbose("last cache merge output time = %s", $self->cache_merge->output_time);
+	return if ($self->cache_merge->output_time and not $self->changes_detected_since_last_merge);
+	$self->clear_cache_merge;
+	$self->cache_merge->to_asana;
+	$self->cache_merge->to_org;
+	$self->cache_merge->save_contents_tofile;
 }
 
-
-sub merge_to_asana {
-	my $self = shift;
-	$self->verbose("merging to asana");
-
-}
-
-sub merge_to_org {
-	my $self = shift;
-	$self->verbose("merging to org");
-
-	# organize by workspace (directory)
-	# then by user          (file)
-	# then by project       (org)
-	# then by task          (org)
-	# then by story         (org)
-
-	my $output_buffers = {};
-
-	# return if $self->org_file_is_being_edited;
-
-	# XXX: this is where i left off for the night. use a2o to output to org.
-
-	$self->cache_merge->walk(sub {
-		my ($self, $obj, $path) = (shift, shift, shift);
-		$self->oa->verbose("merge_to_org: %s %s %s", ref($obj), $obj->id, $obj->can("name") ? $obj->name : $obj->can("text") ? $obj->text : "NO-NAME");
-						 }
-		);
-#				my %properties;
-#				$properties{asana_ASSIGNEE}        = $task->assignee->id if $task->assignee;
-#				$properties{asana_ASSIGNEE_STATUS} = $task->assignee_status;
-#				$properties{asana_CREATED_AT}      = $task->created_at."" if $task->has_created_at;
-#				$properties{asana_COMPLETED}       = $task->completed . "";
-#				$properties{asana_COMPLETED_AT}    = $task->completed_at."" if $task->has_completed_at;
-#				$properties{asana_DUE_ON}          = $task->due_on_value if $task->has_due_on;
-#				$properties{asana_FOLLOWERS}       = join " ", map { $_->id } @{ $task->followers } if @{ $task->followers };
-#				$properties{asana_MODIFIED_AT}     = $task->modified_at."" if $task->has_modified_at;
-#				$properties{asana_PROJECTS}        = join " ", map { $_->id } @{ $task->projects  } if @{ $task->projects };
-#				$properties{asana_PARENT}          = $task->parent->id if $task->parent and $task->parent->id;
-#				$contents{workspaces}{$workspace->id}->{tasks}{$task->id}->{properties} = \%properties;
-
-}
 
 1;
+
+# Local Variables:
+# eval: (rename-buffer "Org::Asana")
+# End:
 

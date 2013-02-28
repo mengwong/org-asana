@@ -6,7 +6,7 @@ package Org::Asana::Cache;
 # the Perl version serves as a translation layer importable and exportable to both Org and Asana.
 
 use Moose::Role;
-use YAML qw(LoadFile DumpFile);
+use YAML qw(LoadFile DumpFile Dump);
 use Tie::IxHash;
 use Class::Load ':all';
 
@@ -84,7 +84,7 @@ sub build { # not BUILD. build() actually builds the cache.
 
 requires 'cachefilename';
 
-has contents => (is=>'rw', isa=>'HashRef');
+has contents => (is=>'rw', isa=>'HashRef', default=>sub {{}});
 
 # contents contains:
 # - contents: { }
@@ -104,52 +104,151 @@ sub reload_fromfile {
 	$self->is_loaded(1);
 	$self->contents($cache->{contents});
 	$self->scan_time($cache->{scan_time});
+	$self->other_things_to_load($cache);
 }
+
+# latest modified_at time
+has modified_at => (is=>'rw', isa=>'Maybe[DateTime]', lazy_build=>1);
+sub _build_modified_at {
+	my $self = shift;
+	my $ts;
+	$self->walk(sub {
+		my ($cache, $obj, $path) = (shift, shift, shift);
+		$obj = $obj->preferred if $obj->can("preferred");
+		if ($obj->can("modified_at") and $obj->has_modified_at and (not defined($ts) or $obj->modified_at > $ts)) { $ts = $obj->modified_at }
+				});
+	return if not $ts;
+	$self->oa->verbose("youngest object in %s is %d seconds old", $self, time - $ts->epoch);
+	return $ts;
+}
+
+sub other_things_to_load { }
+sub other_things_to_save { }
 
 sub save_contents_tofile {
 	my $self = shift;
 	use File::Temp qw(tempfile);
+	use File::Basename;
+	use File::Path qw(make_path);
 	my ($fh, $filename) = tempfile();
+	make_path(dirname($self->cachefilename));
 	$self->oa->verbose("**** dumping %s to %s via tempfile %s", ref($self), $self->cachefilename, $filename);
 	DumpFile($filename, { contents => $self->contents,
 						  scan_time => $self->scan_time,
+						  $self->other_things_to_save,
 			 });
 	rename($filename, $self->cachefilename); # atomic rename.
 }
 
 
-
-
-sub walk_contents {
+sub learn {
 	my $self = shift;
-	my $callback = shift;
-	my $contents = shift;
-	my $path = shift;
-
-#	$self->oa->verbose("walk_contents - @{$path}");
-#	$self->oa->verbose("              - $_ = $contents->{$_}") for keys %$contents;
-
-	while (my ($type, $subtree) = each %$contents) {
-		if ($type eq "obj") { my $obj = $subtree;
-							  if (ref($obj) =~ /::/) { load_class(ref($obj)) unless is_class_loaded(ref($obj)); }
-							  $callback->($self, $obj, $path, $contents);
-#							  $self->oa->verbose("walk_contents >> @{$path} >> callbacking object $obj");
-		} else {
-			foreach my $id (keys %$subtree) {
-				my $subsub = $subtree->{$id};
-#				$self->oa->verbose("walk_contents >> @{[%$path]} >> recursing into $type $id");
-				next if not $subsub;
-				$self->walk_contents($callback, $subsub, [ @$path, $type => $id ] );
-			}
-		}
-	}
+	# $self->learn("p","a","t","h" => $object);
+	my $object = pop;
+	my $path = join "/", @_;
+#	$self->oa->verbose("learn(%s) = %s", $path, $object->can("name") ? $object->name : $object->text);
+	$self->contents->{$path} = $object;
 }
 
+sub retrieve {
+	my $self = shift;
+	my $path = shift;
+#	$self->oa->verbose("retrieve(%s): %s", $path, $self->contents->{path});
+	if (not $path) {
+		return ();
+	}
+	return $self->contents->{$path};
+}
 
 sub walk {
 	my $self = shift;
 	my $callback = shift;
-	$self->walk_contents($callback, $self->contents, [] );
+	my $contents = $self->contents;
+
+	foreach my $path (keys %$contents) {
+
+#	$self->oa->verbose("walk_contents - $path");
+#	$self->oa->verbose("              - $_ = $contents->{$_}") for keys %$contents;
+
+		my $obj = $contents->{$path};
+		if (ref($obj) =~ /::/) { load_class(ref($obj)) unless is_class_loaded(ref($obj)); }
+#   $self->oa->verbose("walk_contents >> $path >> callbacking object $obj");
+		$callback->($self, $obj, $path);
+
+	}
 }
 
+sub workspaces {
+	my $self = shift;
+	return (map  { $self->retrieve($self->tree->{workspace}->{$_}->{path}) }
+			keys %{$self->tree->{workspace}} );
+}
+
+sub tasks {
+	my $self = shift;
+	my $workspace_id = shift;
+	warn "keys are @{[keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "values are @{[values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "value keys are @{[map { keys %$_ } values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "paths are @{[map { $self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path} } keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path}) }
+			keys %{$self->tree->{workspace}->{$workspace_id}->{task}} );
+}
+
+sub projects {
+	my $self = shift;
+	my $workspace_id = shift;
+	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{project}->{$_}->{path}) }
+			keys %{$self->tree->{workspace}->{$workspace_id}->{project}} );
+}
+
+sub tags {
+	my $self = shift;
+	my $workspace_id = shift;
+	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{tag}->{$_}->{path}) }
+			keys %{$self->tree->{workspace}->{$workspace_id}->{tag}} );
+}
+
+sub users {
+	my $self = shift;
+	return (map  { $self->retrieve($self->tree->{user}->{$_}->{path}) }
+			keys %{$self->tree->{user}} );
+}
+
+
+# semantics for path syntax
+has tree => (is=>'rw', lazy_build=>1);
+sub _build_tree {
+	my $self = shift;
+	my $tree = {};
+	while (my ($path, $obj) = each %{$self->contents}) {
+		my @path = split m(/), $path;
+		my $node = $tree;
+		while (@path) {
+			my ($level, $id) = (shift(@path), shift(@path));
+			$node = $node->{$level}->{$id} ||= {};
+			next if @path;
+			$self->oa->verbose("build_tree: %s %s", $level, $path);
+			$node->{path} = $path;
+		}
+
+		# XXX: relocate subtasks under their parents.
+
+		# $tree->{workspace}->{NNN}                  ->{path} = "workspace/NNN"
+		# $tree->{workspace}->{NNN}->{project}->{NNN}->{path} = "workspace/NNN/project/NNN"
+		# $tree->{workspace}->{NNN}->{task}   ->{NNN}->{path} = "workspace/NNN/task/NNN"
+		# etc with story
+	}
+#	print STDERR Dump($tree);
+
+
+	# XXX: rearrange the paths so that subtasks fall under the parent path
+
+	return $tree;
+}
+
+
 1;
+# Local Variables:
+# eval: (rename-buffer "Asana::Cache")
+# End:

@@ -6,10 +6,7 @@ has runpidfilename => (is=>'ro',isa=>'Str',default=>"/tmp/build-cache-org.pid");
 has cachefilename => (is=>'rw', isa=>'Str', lazy=>1, default=>sub{shift->oa->dir . "/cache/org.yaml"});
 
 with 'Org::Asana::Cache';
-
-
-
-
+use Org::Asana::Task;
 use Org::Parser;
 use Class::Load ':all';
 use Tie::IxHash;
@@ -76,8 +73,6 @@ sub build_cache {
 	my $self = shift;
 	$self->oa->verbose("**** Building Org Cache...");
 
-	my $contents = {};
-
 	my $objcount=0;
 
 	foreach my $orgfile ($self->orgfiles) {
@@ -109,16 +104,12 @@ sub build_cache {
 
 		my $workspace = WWW::Asana::Workspace->new(name => $doc->properties->{"asana_workspace_name"},
 												   id   => $_workspace);
-		$contents->{workspaces}{$_workspace}->{obj} = $workspace;
+		$self->learn(workspace => $_workspace => $workspace);
 
 		my $user = WWW::Asana::User->new(name  => $doc->properties->{"asana_name"},
 										 email => $doc->properties->{"asana_email"},
 										 id    => $doc->properties->{"asana_user_id"});
-		$contents->{users}{$_user}->{obj} = $user;
-
-		for (qw(projects tasks tags)) {
-			$contents->{workspaces}{$_workspace}->{$_} ||= {}; tie(%{$contents->{workspaces}{$_workspace}->{$_}}, "Tie::IxHash");
-		}
+		$self->learn(user => $_user => $user);
 
 		$doc->walk(sub {
 			my ($el) = @_;
@@ -146,35 +137,37 @@ sub build_cache {
 
 			if (grep {$_ eq "project"} @{$el->tags}) {
 				(my $notes = $el->children_as_string) =~ s/^:PROPERTIES:.*?:END:\n+//s;
+				$self->oa->verbose("creating new WWW::Asana::Project");
 				my $project = WWW::Asana::Project->new(
 					name => $el->title->as_string,
 					notes => $notes,
 					(map { $el->get_property("asana_".uc$_)?($_=>map{ DateTime::Format::ISO8601->parse_datetime($_)} $el->get_property("asana_".uc$_)):()} qw(created_at modified_at)),
-					map { $el->get_property("asana_" . uc $_) ? ($_ => $el->get_property("asana_" . uc $_)) : () }
-					qw(id archived));
-					$contents->{workspaces}{$_workspace}->{projects}{$_project}->{obj} = $project;
+					(map { $el->get_property("asana_".uc$_)?($_ => $el->get_property("asana_" . uc $_)) : () } qw(id archived)),
+					);
+
+					$self->learn(workspace => $_workspace => project => $_project => $project);
 			}
 			# when parsing, we shall treat section (priority) headings as tasks.
 			if (grep {$_ eq "task" or $_ eq "section" or $_ eq "subtask"} @{$el->tags}) {
 
-				(my $notes = $el->children_as_string) =~ s/^:PROPERTIES:.*?:END:\n+//s;
+				(my $notes = $el->children_as_string) =~ s/^:PROPERTIES:.*?:END:\n+//s; # wonder if this will accidentally capture a subtask or a story.
 
+				$self->oa->verbose("creating new Org::Asana::Task");
 				my $task = Org::Asana::Task->new(
 					name     => $el->title->as_string,
 					notes => $notes,
 					workspace => $workspace,
-					(map { $el->get_property("asana_" . uc $_) ? ($_ => $el->get_property("asana_" . uc $_)) : () }
-					qw(id assignee_status completed )),
+					(map { $el->get_property("asana_" . uc $_) ? ($_ => $el->get_property("asana_" . uc $_)) : () } qw(id assignee_status completed )),
 					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::User   ->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(followers)),
 					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::Project->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(projects)),
 					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::Task   ->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(subtasks)),
-					(map { $el->get_property("asana_".uc$_)?($_=>map{ WWW::Asana::User   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(assignee)),
-					(map { $el->get_property("asana_".uc$_)?($_=>map{ WWW::Asana::Task   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(parent)),
-					(map { $el->get_property("asana_".uc$_)?($_=>map{ DateTime::Format::ISO8601->parse_datetime($_)} $el->get_property("asana_".uc$_)):()} qw(created_at completed_at modified_at due_on)),
-					properties => $el->get_drawer("PROPERTIES"),
+					(map { $el->get_property("asana_".uc$_)?($_=> map{ WWW::Asana::User   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(assignee)),
+					(map { $el->get_property("asana_".uc$_)?($_=> map{ WWW::Asana::Task   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(parent)),
+					(map { $el->get_property("asana_".uc$_)?($_=> map{ DateTime::Format::ISO8601->parse_datetime($_)} $el->get_property("asana_".uc$_)):()} qw(created_at completed_at modified_at due_on)),
+					$el->get_drawer("PROPERTIES") ? (properties => $el->get_drawer("PROPERTIES")->properties ) : (),
 					);
 
-				$contents->{workspaces}{$_workspace}->{tasks}{$task->id}->{obj} = $task;
+				$self->learn(workspace => $_workspace => task => $task->id => $task);
 			}
 			if (grep {$_ eq "story"} @{$el->tags}) {
 				my $target = $el->get_property("asana_TARGET");
@@ -186,14 +179,15 @@ sub build_cache {
 					qw(id type source created_by created_at),
 					target => $target_obj,
 					);
-				$contents->{workspaces}{$_workspace}->{tasks}{$target}->{story}{$story->id}->{obj} = $story;
-
+				$self->learn(workspace => $_workspace => task => $target => story => $story->id => $story);
 			}
 				   });
 	}
 
 	$self->oa->verbose("**** Org Cache Build complete. Read %d objects", $objcount);
-	$self->contents($contents);
 }
 
 1;
+# Local Variables:
+# eval: (rename-buffer "Cache::Org")
+# End:
