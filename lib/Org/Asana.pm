@@ -12,6 +12,8 @@ has 'verbosity'        => (is=>'rw',isa=>'Num|Str',default=>0);
 has 'verbosity_prefix' => (is=>'rw',isa=>'Str',default=>"");
 has 'sensitive'        => (is=>'rw',isa=>'Bool',default=>0); # do we die on error? helps with debugging.
 
+has 'test' => (is=>'rw', isa=>'Bool', default=>0);
+
 sub verbose {
 	my $self = shift;
 	return if not $self->verbosity;

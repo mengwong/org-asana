@@ -29,6 +29,7 @@ my $oa = Org::Asana->new($opt{rc} ? (       rc=>$opt{rc}) : (),
 						 sensitive => $opt{sensitive},
 						 $opt{workspaces}  ? (match_workspaces=>$opt{workspaces} ) : (),
 						 $opt{dir}         ? (dir=>$opt{dir} ) : (),
+						 $opt{test}        ? (test=>$opt{test} ) : (),
 	);
 
 select STDERR; $|++; select STDOUT; $|++;
