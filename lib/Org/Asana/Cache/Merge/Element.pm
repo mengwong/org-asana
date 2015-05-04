@@ -6,13 +6,20 @@ package Org::Asana::Cache::Merge::Element;
 # knows how to output the element to asana
 
 use Moose;
-has preferred => (is=>'rw', lazy_build => 1);
+has preferred => (is=>'rw', predicate => 'has_preferred');
 has asana => (is=>'rw');
 has org   => (is=>'rw');
+has cm    => (is=>'rw'); # Cache::Merge object
 has resolution => (is=>'rw', isa=>'Str');
-has preferred => (is=>'rw');
 has oa    => (is=>'ro', required=>1);
 has path  => (is=>'rw');
+
+sub canstories {
+	my $self = shift;
+	$self->resolve if not $self->has_preferred;
+	$self->oa->verbose("M:E contains a %s object (id=%d) whose ->can(stories) is %s",
+					   $self->ref, $self->preferred->id, $self->preferred->can("stories"));
+}
 
 has ref => (is=>'rw', lazy_build => 1);
 
@@ -119,6 +126,15 @@ sub for_org {
 		$preferred->can("assignee") and
 		not $preferred->has_assignee) { push @org_tags, "unassigned" }
 
+	if ($self->preferred->can("stories")) {
+		$self->oa->verbose("$lcref: %d can stories(). haz it? %s", $self->preferred->id, $self->preferred->has_stories);
+		$self->oa->verbose("$lcref: %d can stories(). they are %s",
+						   $self->preferred->id, join(",", $self->preferred->stories)) if $self->preferred->has_stories;
+	}
+	else {
+		$self->oa->verbose("$lcref: %d cannot stories()  :-(", $self->preferred->id);
+	}
+
 	$prefix = $stars{$lcref} if not $prefix;
 
 	# XXX: rearrange the paths so that subtasks fall under the parent path
@@ -140,12 +156,12 @@ sub for_org {
 
 	my %properties;
 	$properties{asana_ID} = $self->preferred->id;
-	$properties{asana_CREATED_AT} = $self->preferred->created_at."" if $self->preferred->has_created_at;
+	$properties{asana_CREATED_AT}  = $self->preferred->created_at."" if $self->preferred->can("has_created_at") and $self->preferred->has_created_at;
 
 # line 127 "modified_at"
 	$self->oa->verbose("$lcref: doing modified_at");
 
-	$properties{asana_MODIFIED_AT} = $self->preferred->modified_at."" if $self->preferred->has_modified_at;
+	$properties{asana_MODIFIED_AT} = $self->preferred->modified_at."" if $self->preferred->can("has_modified_at") and $self->preferred->has_modified_at;
 
 # line 132 "other_properties"
 
@@ -165,7 +181,14 @@ sub for_org {
 
 	if ($self->preferred->can("stories") and $self->preferred->has_stories) {
 		$self->oa->verbose("$lcref: doing stories");
-		push @outtxt, map { $_->for_org("*$prefix") } @{$self->preferred->stories};
+		for my $story ( @{$self->preferred->stories} ) {
+			my $me_story = $self->cm->retrieve(sprintf("workspace/%d/%s/%d/story/%d",
+													   $self->preferred->workspace->id,
+													   $lcref,
+													   $self->preferred->id,
+													   $story->id));
+			push @outtxt, $me_story->for_org("*$prefix");
+		}
 	}
 
 

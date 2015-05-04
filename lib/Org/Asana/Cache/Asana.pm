@@ -2,7 +2,7 @@ package Org::Asana::Cache::Asana;
 
 use Moose;
 
-has runpidfilename => (is=>'ro',isa=>'Str',default=>"/tmp/build-cache-asana.pid");
+has runpidfilename => (is=>'ro',isa=>'Str', lazy=>1, default=>sub { shift->oa->dir() . "/build-cache-asana.pid"});
 has cachefilename => (is=>'rw', isa=>'Str', lazy=>1, default=>sub{shift->oa->dir . "/cache/asana.yaml"});
 has fast_rebuild_every => (is=>'rw', isa=>'Num',default=>1800);
 has slow_rebuild_every => (is=>'rw', isa=>'Num',default=>86400);
@@ -65,7 +65,7 @@ sub build_cache {
 
 	# strip superfluous Client and Response objects
 	$self->walk(sub { my $self = shift; my $obj = shift;
-					  $self->oa->verbose("trying to strip Client and Response from %s", $obj);
+#					  $self->oa->verbose("trying to strip Client and Response from %s", $obj);
 					  if ($obj->can("has_response") and $obj->has_response) { $obj->clear_response; $self->oa->verbose("clearing Response") if 0 }
 					  if ($obj->can("has_client")   and $obj->has_client)   { $obj->clear_client;   $self->oa->verbose("clearing Client")   if 0 }
 					  if ($obj->can("created_by")   and $obj->has_created_by) { $obj->created_by->clear_client }

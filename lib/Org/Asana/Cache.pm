@@ -187,36 +187,51 @@ sub workspaces {
 sub tasks {
 	my $self = shift;
 	my $workspace_id = shift;
-	warn "keys are @{[keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
-	warn "values are @{[values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
-	warn "value keys are @{[map { keys %$_ } values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
-	warn "paths are @{[map { $self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path} } keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "tasks: keys are @{[keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "tasks: values are @{[values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "tasks: value keys are @{[map { keys %$_ } values %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
+	warn "tasks: paths are @{[map { $self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path} } grep { $self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path} } keys %{$self->tree->{workspace}->{$workspace_id}->{task}}]}\n";
 	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{task}->{$_}->{path}) }
-			keys %{$self->tree->{workspace}->{$workspace_id}->{task}} );
+			keys %{                $self->tree->{workspace}->{$workspace_id}->{task}} );
 }
 
 sub projects {
 	my $self = shift;
 	my $workspace_id = shift;
 	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{project}->{$_}->{path}) }
-			keys %{$self->tree->{workspace}->{$workspace_id}->{project}} );
+			keys %{                $self->tree->{workspace}->{$workspace_id}->{project}} );
 }
 
 sub tags {
 	my $self = shift;
 	my $workspace_id = shift;
 	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{tag}->{$_}->{path}) }
-			keys %{$self->tree->{workspace}->{$workspace_id}->{tag}} );
+			keys %{                $self->tree->{workspace}->{$workspace_id}->{tag}} );
 }
 
 sub users {
 	my $self = shift;
 	return (map  { $self->retrieve($self->tree->{user}->{$_}->{path}) }
-			keys %{$self->tree->{user}} );
+			keys %{                $self->tree->{user}} );
 }
 
+sub task_stories {
+	my $self = shift;
+	my $workspace_id = shift;
+	my $task_id = shift;
+	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{task}->{$task_id}->{story}->{$_}->{path}) }
+			keys %{                $self->tree->{workspace}->{$workspace_id}->{task}->{$task_id}->{story}||{}} );
+}
 
-# semantics for path syntax
+sub project_stories {
+	my $self = shift;
+	my $workspace_id = shift;
+	my $project_id = shift;
+	return (map  { $self->retrieve($self->tree->{workspace}->{$workspace_id}->{project}->{$project_id}->{story}->{$_}->{path}) }
+			keys %{                $self->tree->{workspace}->{$workspace_id}->{project}->{$project_id}->{story}||{}} );
+}
+
+# convert the flat path into a tree
 has tree => (is=>'rw', lazy_build=>1);
 sub _build_tree {
 	my $self = shift;

@@ -32,7 +32,10 @@ sub walk_asana {
 		my ($ca, $obj, $path) = (shift, shift, shift);
 		$self->oa->verbose("walk_asana: %s %s %s", $path, ref($obj), $obj->can("name") ? $obj->name : $obj->can("text") ? $obj->text : "NO-NAME");
 		if ($self->retrieve($path)) { $self->retrieve($path)->asana($obj); }
-		else { $self->learn($path => Org::Asana::Cache::Merge::Element->new(oa=>$self->oa, path=>$path, asana => $obj)); }
+		else { my $me = Org::Asana::Cache::Merge::Element->new(oa=>$self->oa, path=>$path, asana => $obj, cm => $self);
+			   $self->learn($path => $me);
+#			   $me->canstories;
+		}
 								  });
 }
 
@@ -42,7 +45,7 @@ sub walk_org {
 		my ($co, $obj, $path) = (shift, shift, shift);
 		$self->oa->verbose("walk_org: %s %s %s", $path, ref($obj), $obj->can("name") ? $obj->name : $obj->can("text") ? $obj->text : "NO-NAME");
 		if ($self->retrieve($path)) { $self->retrieve($path)->org($obj); }
-		else { $self->learn($path => Org::Asana::Cache::Merge::Element->new(oa=>$self->oa, path=>$path, org => $obj)); }
+		else { $self->learn($path => Org::Asana::Cache::Merge::Element->new(oa=>$self->oa, path=>$path, org => $obj, cm => $self)); }
 								  });
 }
 
@@ -95,7 +98,9 @@ sub to_org {
 	# then by task          (org)
 	# then by story         (org)
 
+	# XXX: TODO: absolutely refuse to clobber:
 	# return if $self->org_file_is_being_edited;
+	# return if $self->org_file_is_newer_than_org_cache;
 
 	foreach my $workspace ($self->workspaces) {
 		my $dir = $self->oa->dir."/workspaces/".$workspace->name;
@@ -109,28 +114,28 @@ sub to_org {
 			my %tasks_printed;
 			my $user = $user->preferred;
 
-#			$self->oa->verbose("CM: got user %s", $user->id);
+			$self->oa->verbose("CM: learning tasks for user %s", $user->id);
 
 			# maybe move this to the reload subroutine.
 			my %project2task;
 			foreach my $wtask ($self->tasks($workspace_id)) {
-#				$self->oa->verbose("CM: considering task %s", $wtask->preferred->id);
+				$self->oa->verbose("CM: considering task %s", $wtask->preferred->id);
+				if ($wtask->preferred->assignee and $user->id != $wtask->preferred->assignee->id) {
+					$self->oa->verbose("... task %s not assigned to current user %s", $wtask->preferred->id, $user->id);
+					next;
+				}
 				if ($wtask->preferred->can("projects") and not $wtask->preferred->has_projects) { push @{$project2task{"NO PROJECT"}}, $wtask; next }
 				for my $project (@{$wtask->preferred->projects || []}) {
-#					$self->oa->verbose("CM: considering task %s project %s", $wtask->preferred->id, $project->id);
-					if ($wtask->preferred->assignee and $user->id != $wtask->preferred->assignee->id) {
-#						$self->oa->verbose("... task %s not assigned to current user %s", $wtask->preferred->id, $user->id);
-						next;
-					}
+					$self->oa->verbose("CM: task %s belongs to project %s", $wtask->preferred->id, $project->id);
 					push @{$project2task{$project->id}}, $wtask;
 				}
 			}
 
-#			$self->oa->verbose("CM: outputting user %s", $user->id);
+			$self->oa->verbose("CM: outputting user %s", $user->id);
 
-			foreach my $project ($self->projects($workspace_id)) {
+			foreach my $project ($self->projects($workspace_id)) { # maybe we should iterate through keys %project2task
 
-#				$self->oa->verbose("CM: outputting project %s with %d tasks", $project->preferred->id, scalar @{$project2task{$project->preferred->id}||[]});
+				$self->oa->verbose("CM: outputting project %s with %d tasks assigned to me", $project->preferred->id, scalar @{$project2task{$project->preferred->id}||[]});
 				
 				# the project's ->tasks method goes to the cloud.
 				# next if not @{$project->preferred->tasks};
@@ -138,7 +143,7 @@ sub to_org {
 				next if not @{$project2task{$project->preferred->id}||[]};
 				push @outtxt, $project->for_org("**");
 
-#				$self->oa->verbose("CM: outputting project %s's tasks", $project->preferred->id);
+				$self->oa->verbose("CM: outputting project %s's tasks", $project->preferred->id);
 
 				foreach my $task (@{$project2task{$project->preferred->id}||[]}) {
 					$self->oa->verbose("--- project %s has task %s", $project->preferred->id, $task->preferred->id);
@@ -149,6 +154,8 @@ sub to_org {
 
 			next if not @outtxt;
 
+			my $timestamp = $self->oa->test ? "." . DateTime->now->iso8601 : "";
+			
 			open OUTFILE, ">", "$dir/".$user->name.".org";
 			print OUTFILE "-*- mode: org; mode: auto-revert -*-\n";
 			print OUTFILE "#+TITLE: " . $user->name, "\n";

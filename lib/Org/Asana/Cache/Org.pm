@@ -2,7 +2,7 @@ package Org::Asana::Cache::Org;
 
 use Moose;
 
-has runpidfilename => (is=>'ro',isa=>'Str',default=>"/tmp/build-cache-org.pid");
+has runpidfilename => (is=>'ro',isa=>'Str', lazy=>1, default=>sub { shift->oa->dir() . "/build-cache-org.pid" });
 has cachefilename => (is=>'rw', isa=>'Str', lazy=>1, default=>sub{shift->oa->dir . "/cache/org.yaml"});
 
 with 'Org::Asana::Cache';
@@ -100,16 +100,21 @@ sub build_cache {
 		use WWW::Asana::Task;
 		use WWW::Asana::User;
 		use WWW::Asana::Story;
-		$self->oa->verbose("document properties: %s", $_) for (split /\n/, Dump($doc->properties));
+#		$self->oa->verbose("document properties: %s", $_) for (split /\n/, Dump($doc->properties));
 
+#		$self->oa->verbose("creating new WWW::Asana::Workspace");
 		my $workspace = WWW::Asana::Workspace->new(name => $doc->properties->{"asana_workspace_name"},
 												   id   => $_workspace);
 		$self->learn(workspace => $_workspace => $workspace);
+#		$self->oa->verbose("done creating new WWW::Asana::User");
+
+#		$self->oa->verbose("creating new WWW::Asana::User");
 
 		my $user = WWW::Asana::User->new(name  => $doc->properties->{"asana_name"},
 										 email => $doc->properties->{"asana_email"},
 										 id    => $doc->properties->{"asana_user_id"});
 		$self->learn(user => $_user => $user);
+#		$self->oa->verbose("done creating new WWW::Asana::User");
 
 		$doc->walk(sub {
 			my ($el) = @_;
@@ -122,6 +127,7 @@ sub build_cache {
 												$_ eq "story") } @{$el->tags};
 
 			$objcount++;
+#			$self->oa->verbose("walking object $objcount with tags %s", join(",",@{$el->tags||[]}));
 
 			$_project   = $el->get_property("asana_ID") if (grep { $_ eq "project"   } @{$el->tags});
 			$_section   = $el->get_property("asana_ID") if (grep { $_ eq "section"   } @{$el->tags});
@@ -137,49 +143,82 @@ sub build_cache {
 
 			if (grep {$_ eq "project"} @{$el->tags}) {
 				(my $notes = $el->children_as_string) =~ s/^:PROPERTIES:.*?:END:\n+//s;
-				$self->oa->verbose("creating new WWW::Asana::Project");
-				my $project = WWW::Asana::Project->new(
+#				$self->oa->verbose("creating new WWW::Asana::Project");
+				my %project_args = (
 					name => $el->title->as_string,
 					notes => $notes,
 					(map { $el->get_property("asana_".uc$_)?($_=>map{ DateTime::Format::ISO8601->parse_datetime($_)} $el->get_property("asana_".uc$_)):()} qw(created_at modified_at)),
 					(map { $el->get_property("asana_".uc$_)?($_ => $el->get_property("asana_" . uc $_)) : () } qw(id archived)),
 					);
+				
+				my $project = eval { WWW::Asana::Project->new(%project_args) };
 
-					$self->learn(workspace => $_workspace => project => $_project => $project);
+				if ($@) {
+					warn "!!! unable to create O::A::P: $@\n";
+					warn "!!! project_args =\n";
+					warn Dump(\%project_args);
+					die;
+				}
+
+#				$self->oa->verbose("creation done -- WWW::Asana::Project");
+
+				$self->learn(workspace => $_workspace => project => $_project => $project);
+
+#				$self->oa->verbose("learning done -- WWW::Asana::Project");
 			}
 			# when parsing, we shall treat section (priority) headings as tasks.
 			if (grep {$_ eq "task" or $_ eq "section" or $_ eq "subtask"} @{$el->tags}) {
 
 				(my $notes = $el->children_as_string) =~ s/^:PROPERTIES:.*?:END:\n+//s; # wonder if this will accidentally capture a subtask or a story.
+#				$self->oa->verbose("constructing task_args for task $_task");
 
-				$self->oa->verbose("creating new Org::Asana::Task");
-				my $task = Org::Asana::Task->new(
+				my %task_args = (
 					name     => $el->title->as_string,
 					notes => $notes,
 					workspace => $workspace,
 					(map { $el->get_property("asana_" . uc $_) ? ($_ => $el->get_property("asana_" . uc $_)) : () } qw(id assignee_status completed )),
 					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::User   ->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(followers)),
 					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::Project->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(projects)),
-					(map { $el->get_property("asana_".uc$_)?($_=>[map{ WWW::Asana::Task   ->new(id=>$_)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(subtasks)),
+
+					# XXX: let's confirm this subtask is fully instantiated with name, etc attributes.
+					(map { $el->get_property("asana_".uc$_)?($_=>[map{ Org::Asana::Task   ->new(id=>$_,workspace=>$workspace)} split ' ', $el->get_property("asana_".uc$_)]):()} qw(subtasks)),
 					(map { $el->get_property("asana_".uc$_)?($_=> map{ WWW::Asana::User   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(assignee)),
-					(map { $el->get_property("asana_".uc$_)?($_=> map{ WWW::Asana::Task   ->new(id=>$_)} $el->get_property("asana_".uc$_)):()} qw(parent)),
 					(map { $el->get_property("asana_".uc$_)?($_=> map{ DateTime::Format::ISO8601->parse_datetime($_)} $el->get_property("asana_".uc$_)):()} qw(created_at completed_at modified_at due_on)),
 					$el->get_drawer("PROPERTIES") ? (properties => $el->get_drawer("PROPERTIES")->properties ) : (),
 					);
 
+#				$self->oa->verbose("creating new Org::Asana::Task with workspace=$workspace");
+				my $task = eval { Org::Asana::Task->new(%task_args); };
+				if ($@) {
+					warn "!!! unable to create O::A::T: $@\n";
+					warn "!!! task_args =\n";
+					warn Dump(\%task_args);
+					die;
+				}
+
+#				$self->oa->verbose("creation done -- Org::Asana::Task");
 				$self->learn(workspace => $_workspace => task => $task->id => $task);
 			}
 			if (grep {$_ eq "story"} @{$el->tags}) {
 				my $target = $el->get_property("asana_TARGET");
 				my ($target_type) = $target =~ s/(\D)//;
+
 				my $target_obj = "WWW::Asana::$target_type"->new(id=>$target);
+
+#				$self->oa->verbose("creating new $target_obj");
+
 				my $story = WWW::Asana::Story->new(
 					text => $el->title->as_string,
 					map { $el->get_property("asana_" . uc $_) ? ($_ => $el->get_property("asana_" . uc $_)) : () }
 					qw(id type source created_by created_at),
 					target => $target_obj,
 					);
+
+#				$self->oa->verbose("creation done -- WWW::Asana::Story");
+
 				$self->learn(workspace => $_workspace => task => $target => story => $story->id => $story);
+
+#				$self->oa->verbose("learning done -- WWW::Asana::Story");
 			}
 				   });
 	}
